@@ -1,4 +1,9 @@
 import { useState, useCallback, useEffect, useRef } from "react";
+import { createClient } from "@supabase/supabase-js";
+
+const SUPABASE_URL  = "https://oqsxhlxxtyauwueoiaoi.supabase.co";
+const SUPABASE_KEY  = "sb_publishable_SVzWas_UkQ7CI9hgpAW8Jg_uROCt9eu";
+const supabase      = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const FF   = "-apple-system,'SF Pro Display','SF Pro Text','Helvetica Neue',sans-serif";
 const fmt  = (v) => new Intl.NumberFormat("en-US",{style:"currency",currency:"USD",maximumFractionDigits:0}).format(v||0);
@@ -15,11 +20,23 @@ const GOLD  = "#c8a050";
 const GOLD2 = "#8b6520";
 const TIP_URL = "https://paypal.me/toavalon";
 
-// Portfolio stored at a fixed key — no login needed.
-// SUPABASE SWAP: replace LOCAL_PORT_KEY reads/writes with supabase database calls.
-const LOCAL_PORT_KEY = "tav_portfolio_local";
-const tryLoad = async (key) => { try { const r=await window.storage.get(key); return r?JSON.parse(r.value):null; } catch { return null; } };
-const trySave = (key,val)   => { try { window.storage.set(key,JSON.stringify(val)); } catch {} };
+// ─── Supabase data helpers ────────────────────────────────────────────────────
+async function dbLoad(userId) {
+  const { data, error } = await supabase
+    .from("portfolios")
+    .select("data")
+    .eq("user_id", userId)
+    .single();
+  if (error || !data) return null;
+  return data.data;
+}
+
+async function dbSave(userId, portfolio) {
+  await supabase
+    .from("portfolios")
+    .upsert({ user_id: userId, data: portfolio, updated_at: new Date().toISOString() },
+             { onConflict: "user_id" });
+}
 
 const ASSET_CATS = ["Cash & Savings","Stocks / ETFs","Crypto","Real Estate","Vehicles","Retirement","Business","Other"];
 const DEBT_CATS  = ["Mortgage","Auto Loan","Student Loan","Credit Card","Personal Loan","Business Debt","Other"];
@@ -1328,7 +1345,7 @@ function BudgetPanel({income, expenses, onAddIncome, onUpdateIncome, onRemoveInc
 }
 
 // ─── Settings Sheet — export / import, no auth ────────────────────────────────
-function SettingsSheet({onClose, getExportData, onImport}) {
+function SettingsSheet({onClose, getExportData, onImport, onSignOut, userEmail}) {
   const fileRef = useRef(null);
   const [showExport, setShowExport] = useState(false);
   const [exportData, setExportData] = useState(null);
@@ -1373,7 +1390,10 @@ function SettingsSheet({onClose, getExportData, onImport}) {
         <div style={{position:"relative",width:"100%",maxWidth:520,background:"#161412",border:"1px solid rgba(200,160,80,.15)",borderRadius:"20px 20px 0 0",padding:"12px 24px 48px",fontFamily:FF,animation:"slideUp .28s cubic-bezier(.4,0,.2,1)",zIndex:1}}>
           <div style={{width:34,height:4,background:"rgba(200,160,80,.25)",borderRadius:2,margin:"0 auto 24px"}}/>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:20}}>
+            <div>
             <div style={{fontSize:17,fontWeight:700,color:"#f0ece4"}}>Data & Backup</div>
+            {userEmail&&<div style={{fontSize:11,color:"#5a5040",marginTop:2}}>{userEmail}</div>}
+          </div>
             <div onClick={onClose} style={{background:"rgba(255,255,255,.07)",borderRadius:"50%",width:30,height:30,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:"#636366"}}><Ic.X/></div>
           </div>
 
@@ -1392,9 +1412,20 @@ function SettingsSheet({onClose, getExportData, onImport}) {
           )}
 
           <div style={{fontSize:12,color:"#3a3530",textAlign:"center",lineHeight:1.6}}>
-            Your portfolio saves automatically to this browser.<br/>
-            Export regularly to keep a backup on your device.
+            Your portfolio saves automatically to the cloud.<br/>
+            Export regularly to keep a local backup.
           </div>
+
+          {onSignOut&&(
+            <div onClick={onSignOut}
+              style={{background:"rgba(255,69,58,.08)",border:"1px solid rgba(255,69,58,.15)",borderRadius:10,
+                      color:"#ff6b6b",fontSize:14,fontWeight:600,fontFamily:FF,
+                      padding:"12px",cursor:"pointer",textAlign:"center",userSelect:"none",transition:"all .2s"}}
+              onMouseEnter={e=>e.currentTarget.style.background="rgba(255,69,58,.15)"}
+              onMouseLeave={e=>e.currentTarget.style.background="rgba(255,69,58,.08)"}>
+              Sign Out
+            </div>
+          )}
 
           <input ref={fileRef} type="file" accept=".json,application/json" style={{display:"none"}} onChange={handleFile}/>
         </div>
@@ -1407,10 +1438,100 @@ function SettingsSheet({onClose, getExportData, onImport}) {
   );
 }
 
+
+// ─── Login Screen ─────────────────────────────────────────────────────────────
+function LoginScreen({onAuth}) {
+  const [mode,     setMode]     = useState("login"); // "login" | "signup"
+  const [email,    setEmail]    = useState("");
+  const [password, setPassword] = useState("");
+  const [loading,  setLoading]  = useState(false);
+  const [error,    setError]    = useState("");
+  const [info,     setInfo]     = useState("");
+
+  const handle = async () => {
+    if (!email || !password) { setError("Please enter your email and password."); return; }
+    setLoading(true); setError(""); setInfo("");
+    if (mode === "login") {
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) setError(error.message);
+      else onAuth(data.user);
+    } else {
+      const { data, error } = await supabase.auth.signUp({ email, password });
+      if (error) setError(error.message);
+      else if (data.user && !data.user.confirmed_at) {
+        setInfo("Check your email for a confirmation link, then sign in.");
+        setMode("login");
+      } else if (data.user) onAuth(data.user);
+    }
+    setLoading(false);
+  };
+
+  const inputStyle = {
+    width:"100%",background:"rgba(255,255,255,.06)",border:"1px solid rgba(200,160,80,.2)",
+    borderRadius:10,color:"#f0ece4",fontSize:15,fontFamily:FF,padding:"12px 14px",
+    outline:"none",boxSizing:"border-box",transition:"border-color .2s",
+  };
+
+  return (
+    <div style={{minHeight:"100vh",background:"#060504",display:"flex",alignItems:"center",justifyContent:"center",padding:24,fontFamily:FF}}>
+      <div style={{position:"fixed",top:0,left:0,right:0,height:320,background:"radial-gradient(ellipse at 50% -20%, rgba(200,160,80,.07) 0%, transparent 65%)",pointerEvents:"none"}}/>
+      <div style={{width:"100%",maxWidth:380,position:"relative",zIndex:1}}>
+        {/* Brand */}
+        <div style={{textAlign:"center",marginBottom:36}}>
+          <Wordmark size="lg"/>
+          <div style={{fontSize:13,color:"#5a5040",marginTop:10}}>Personal Finance Dashboard</div>
+        </div>
+        {/* Card */}
+        <div style={{background:"rgba(22,20,18,.95)",border:"1px solid rgba(200,160,80,.15)",borderRadius:20,padding:28,position:"relative",overflow:"hidden"}}>
+          <div style={{position:"absolute",top:0,left:0,right:0,height:2,background:`linear-gradient(90deg,${GOLD}88,${GOLD}22)`}}/>
+          <div style={{fontSize:18,fontWeight:700,color:"#f0ece4",marginBottom:20,letterSpacing:"-.02em"}}>
+            {mode==="login"?"Welcome back":"Create account"}
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            <input value={email} onChange={e=>setEmail(e.target.value)}
+              placeholder="Email" type="email" autoComplete="email"
+              style={inputStyle}
+              onFocus={e=>e.target.style.borderColor="rgba(200,160,80,.5)"}
+              onBlur={e=>e.target.style.borderColor="rgba(200,160,80,.2)"}
+              onKeyDown={e=>e.key==="Enter"&&handle()}/>
+            <input value={password} onChange={e=>setPassword(e.target.value)}
+              placeholder="Password" type="password" autoComplete={mode==="login"?"current-password":"new-password"}
+              style={inputStyle}
+              onFocus={e=>e.target.style.borderColor="rgba(200,160,80,.5)"}
+              onBlur={e=>e.target.style.borderColor="rgba(200,160,80,.2)"}
+              onKeyDown={e=>e.key==="Enter"&&handle()}/>
+            {error&&<div style={{fontSize:12,color:"#ff6b6b",padding:"8px 12px",background:"rgba(255,69,58,.08)",borderRadius:8,border:"1px solid rgba(255,69,58,.15)"}}>{error}</div>}
+            {info&&<div style={{fontSize:12,color:"#30d158",padding:"8px 12px",background:"rgba(48,209,88,.08)",borderRadius:8,border:"1px solid rgba(48,209,88,.15)"}}>{info}</div>}
+            <div onClick={handle}
+              style={{background:loading?"rgba(200,160,80,.3)":`linear-gradient(135deg,${GOLD2},${GOLD})`,
+                borderRadius:12,color:"#1a1208",fontSize:15,fontWeight:700,fontFamily:FF,
+                padding:"13px",cursor:loading?"not-allowed":"pointer",textAlign:"center",
+                userSelect:"none",transition:"all .2s",marginTop:4}}>
+              {loading?"…":mode==="login"?"Sign In":"Create Account"}
+            </div>
+          </div>
+          <div style={{textAlign:"center",marginTop:18,fontSize:13,color:"#5a5040"}}>
+            {mode==="login"?"Don't have an account? ":"Already have an account? "}
+            <span onClick={()=>{setMode(m=>m==="login"?"signup":"login");setError("");setInfo("");}}
+              style={{color:GOLD,cursor:"pointer",userSelect:"none"}}>
+              {mode==="login"?"Sign up":"Sign in"}
+            </span>
+          </div>
+        </div>
+        <div style={{textAlign:"center",marginTop:16,fontSize:11,color:"#3a3530"}}>
+          Your portfolio is encrypted and stored securely.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // ROOT APP
 // ═══════════════════════════════════════════════════════════════════════════════
 export default function App() {
+  const [user,       setUser]       = useState(null);
+  const [authReady,  setAuthReady]  = useState(false);
   const [isMobile,   setIsMobile]   = useState(false);
   const [showTip,    setShowTip]    = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -1423,10 +1544,22 @@ export default function App() {
   const [savedAt,    setSavedAt]    = useState(null);
   const saveTimer = useRef(null);
 
-  // Load portfolio on mount — no login needed
-  // SUPABASE SWAP: replace with supabase.from("portfolios").select() filtered by user
+  // ── Auth: restore session on mount ──────────────────────────────────────────
   useEffect(()=>{
-    tryLoad(LOCAL_PORT_KEY).then(data=>{
+    supabase.auth.getSession().then(({data:{session}})=>{
+      setUser(session?.user ?? null);
+      setAuthReady(true);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((_e, session)=>{
+      setUser(session?.user ?? null);
+    });
+    return ()=>listener.subscription.unsubscribe();
+  },[]);
+
+  // ── Load portfolio when user logs in ────────────────────────────────────────
+  useEffect(()=>{
+    if (!user) return;
+    dbLoad(user.id).then(data=>{
       if(data){
         setAssets(stripLive(data.assets||[blankItem("asset")]));
         setDebts(stripLive(data.debts||[blankItem("debt")]));
@@ -1435,15 +1568,18 @@ export default function App() {
         if(data.wallets)  setWallets(data.wallets);
       }
     });
-  },[]);
+  },[user?.id]);
 
-  // Auto-save on every change
-  // SUPABASE SWAP: replace with supabase.from("portfolios").upsert()
+  // ── Auto-save on every change ────────────────────────────────────────────────
   useEffect(()=>{
+    if (!user) return;
     clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(()=>{ trySave(LOCAL_PORT_KEY,{assets,debts,income,expenses,wallets}); setSavedAt(new Date()); },1200);
+    saveTimer.current = setTimeout(()=>{
+      dbSave(user.id, {assets,debts,income,expenses,wallets});
+      setSavedAt(new Date());
+    },1200);
     return ()=>clearTimeout(saveTimer.current);
-  },[assets,debts,income,expenses,wallets]);
+  },[assets,debts,income,expenses,wallets,user?.id]);
 
   const totalAssets = assets.reduce((s,a)=>s+parseNum(a.value),0);
   const totalDebts  = debts.reduce((s,d)=>s+parseNum(d.value),0);
@@ -1549,6 +1685,26 @@ export default function App() {
     setSavedAt(null);
   };
 
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    setAssets([blankItem("asset")]);
+    setDebts([blankItem("debt")]);
+    setIncome([blankIncome()]);
+    setExpenses([blankExpense()]);
+    setWallets([blankWallet()]);
+    setSavedAt(null);
+  };
+
+  // Show nothing while checking auth
+  if (!authReady) return (
+    <div style={{minHeight:"100vh",background:"#060504",display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <div style={{color:"#5a5040",fontFamily:FF,fontSize:14}}>Loading…</div>
+    </div>
+  );
+
+  // Show login screen if not authenticated
+  if (!user) return <LoginScreen onAuth={setUser}/>;
+
   const GLOBAL_STYLES = `
     @keyframes spin    { to { transform:rotate(360deg); } }
     @keyframes slideUp { from { transform:translateY(100%); } to { transform:translateY(0); } }
@@ -1588,7 +1744,7 @@ export default function App() {
 
   // ── SHARED MODALS ───────────────────────────────────────────────────────────
   const Modals = <>
-    {showSettings&&<SettingsSheet onClose={()=>setShowSettings(false)} getExportData={getExportData} onImport={handleImportPortfolio}/>}
+    {showSettings&&<SettingsSheet onClose={()=>setShowSettings(false)} getExportData={getExportData} onImport={handleImportPortfolio} onSignOut={handleSignOut} userEmail={user?.email}/>}
     {showTip&&<TipModal onClose={()=>setShowTip(false)}/>}
   </>;
 
@@ -1705,6 +1861,12 @@ export default function App() {
               onMouseEnter={e=>e.currentTarget.style.background="rgba(200,160,80,.18)"}
               onMouseLeave={e=>e.currentTarget.style.background="rgba(200,160,80,.08)"}>
               ⚙ Data
+            </div>
+            <div onClick={handleSignOut}
+              style={{background:"rgba(255,255,255,.05)",border:"1px solid rgba(255,255,255,.1)",borderRadius:20,color:"#636366",fontSize:13,fontWeight:600,fontFamily:FF,padding:"6px 14px",cursor:"pointer",userSelect:"none",transition:"all .18s"}}
+              onMouseEnter={e=>{e.currentTarget.style.background="rgba(255,69,58,.1)";e.currentTarget.style.color="#ff453a";e.currentTarget.style.borderColor="rgba(255,69,58,.2)";}}
+              onMouseLeave={e=>{e.currentTarget.style.background="rgba(255,255,255,.05)";e.currentTarget.style.color="#636366";e.currentTarget.style.borderColor="rgba(255,255,255,.1)";}}>
+              Sign Out
             </div>
           </div>
         </div>
