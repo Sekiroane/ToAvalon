@@ -18,8 +18,8 @@ const TIP_URL = "https://paypal.me/toavalon";
 // Portfolio stored at a fixed key — no login needed.
 // SUPABASE SWAP: replace LOCAL_PORT_KEY reads/writes with supabase database calls.
 const LOCAL_PORT_KEY = "tav_portfolio_local";
-const tryLoad = async (key) => { try { const r=localStorage.getItem(key); return r?JSON.parse(r):null; } catch { return null; } };
-const trySave = (key,val)   => { try { localStorage.setItem(key,JSON.stringify(val)); } catch {} };
+const tryLoad = async (key) => { try { const r=await window.storage.get(key); return r?JSON.parse(r.value):null; } catch { return null; } };
+const trySave = (key,val)   => { try { window.storage.set(key,JSON.stringify(val)); } catch {} };
 
 const ASSET_CATS = ["Cash & Savings","Stocks / ETFs","Crypto","Real Estate","Vehicles","Retirement","Business","Other"];
 const DEBT_CATS  = ["Mortgage","Auto Loan","Student Loan","Credit Card","Personal Loan","Business Debt","Other"];
@@ -1426,47 +1426,14 @@ export default function App() {
   // Load portfolio on mount — no login needed
   // SUPABASE SWAP: replace with supabase.from("portfolios").select() filtered by user
   useEffect(()=>{
-    const seed = {
-  assets: [
-    {id:"eghmn4k2",label:"Wells Fargo",value:"20000",qty:"",price:"",rate:".01",holdings:[],category:"Cash & Savings",liveStatus:"idle",liveNote:""},
-    {id:"gqkg5pow",label:"Banner Bank",value:"20000",qty:"",price:"",rate:".01",holdings:[],category:"Cash & Savings",liveStatus:"idle",liveNote:""},
-    {id:"joo519nf",label:"Ally Savings",value:"74246.72",qty:"",price:"",rate:"3.1",holdings:[],category:"Cash & Savings",liveStatus:"idle",liveNote:""},
-    {id:"2ck9a7ik",label:"Apple Savings",value:"56343.71",qty:"",price:"",rate:"3.65",holdings:[],category:"Cash & Savings",liveStatus:"idle",liveNote:""},
-    {id:"7i8mleud",label:"Fidelity Crypto",value:"94968.85",qty:"",price:"",rate:"",holdings:[
-      {id:"49cgf6hz",ticker:"BTC",qty:"1.026",price:"",value:""},
-      {id:"hydncsrr",ticker:"ETH",qty:"5.793",price:"",value:""},
-    ],category:"Stocks / ETFs",liveStatus:"idle",liveNote:""},
-    {id:"9ujp76mt",label:"Fidelity IRA",value:"37334.03",qty:"",price:"",rate:"",holdings:[
-      {id:"woze5sww",ticker:"FBTC",qty:"542.969",price:"",value:""},
-    ],category:"Stocks / ETFs",liveStatus:"idle",liveNote:""},
-    {id:"vuiunq13",label:"John Hancock 401K",value:"495556.33",qty:"",price:"",rate:"",holdings:[
-      {id:"cyh1w2gb",ticker:"VFIAX",qty:"740",price:"",value:""},
-    ],category:"Retirement",liveStatus:"idle",liveNote:""},
-    {id:"zgo3tnf4",label:"Charles Schwab IRA",value:"157216.59",qty:"",price:"",rate:"",holdings:[
-      {id:"9gfuqex5",ticker:"NVDA",qty:"515.38",price:"",value:""},
-      {id:"5cwl9jic",ticker:"ETHW",qty:"3117",price:"",value:""},
-    ],category:"Retirement",liveStatus:"idle",liveNote:""},
-    {id:"c9q70nio",label:"Canyon Ln",value:"950000",qty:"",price:"",rate:"",holdings:[],category:"Real Estate",liveStatus:"idle",liveNote:""},
-  ],
-  debts: [
-    {id:"inzws2aq",label:"Canyon Ln",value:"790000",qty:"",price:"",rate:"4.75",holdings:[],category:"Mortgage",liveStatus:"idle",liveNote:""},
-    {id:"ud7yrwbn",label:"BMW",value:"28297.56",qty:"",price:"",rate:"6.5",holdings:[],category:"Auto Loan",liveStatus:"idle",liveNote:""},
-  ],
-  income: [
-    {id:"nohitu5j",label:"Steamfitter",amount:""},
-  ],
-  expenses: [
-    {id:"tfpilvra",label:"",amount:"",category:"Housing"},
-  ],
-};
     tryLoad(LOCAL_PORT_KEY).then(data=>{
-      const d = data || seed;
-      if (!data) trySave(LOCAL_PORT_KEY, seed);  // first run — persist the seed
-      setAssets(stripLive(d.assets||[blankItem("asset")]));
-      setDebts(stripLive(d.debts||[blankItem("debt")]));
-      if(d.income)   setIncome(d.income);
-      if(d.expenses) setExpenses(d.expenses);
-      if(d.wallets)  setWallets(d.wallets);
+      if(data){
+        setAssets(stripLive(data.assets||[blankItem("asset")]));
+        setDebts(stripLive(data.debts||[blankItem("debt")]));
+        if(data.income)   setIncome(data.income);
+        if(data.expenses) setExpenses(data.expenses);
+        if(data.wallets)  setWallets(data.wallets);
+      }
     });
   },[]);
 
